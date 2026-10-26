@@ -1,6 +1,16 @@
-name: TheRedStalker
-version: 1.0.0
-main: com.kdmv.redstalker.RedStalkerPlugin
-api-version: '1.21'
-description: The Red Stalker for KDMV SMP
-author: KDMV
+package com.kdmv.redstalker;
+
+import org.bukkit.plugin.java.JavaPlugin;
+
+public final class RedStalkerPlugin extends JavaPlugin {
+
+    @Override
+    public void onEnable() {
+        getLogger().info("The Red Stalker has awakened!");
+    }
+
+    @Override
+    public void onDisable() {
+        getLogger().info("The Red Stalker has disappeared.");
+    }
+}
