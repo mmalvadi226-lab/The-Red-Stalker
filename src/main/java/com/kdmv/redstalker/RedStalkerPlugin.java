@@ -1,16 +1,8 @@
 package com.kdmv.redstalker;
 
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.World;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.EntityType;
-import org.bukkit.entity.Player;
-import org.bukkit.entity.Zombie;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
+import org.bukkit.*;
+import org.bukkit.entity.*;
+import org.bukkit.event.*;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ArmorMeta;
@@ -18,10 +10,11 @@ import org.bukkit.inventory.meta.trim.ArmorTrim;
 import org.bukkit.inventory.meta.trim.TrimMaterial;
 import org.bukkit.inventory.meta.trim.TrimPattern;
 import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
-import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.util.Vector;
 
 import java.util.Random;
 
@@ -38,9 +31,8 @@ public final class RedStalkerPlugin extends JavaPlugin
         stalkerKey = new NamespacedKey(this, "red_stalker");
         Bukkit.getPluginManager().registerEvents(this, this);
 
-        // ពិនិត្យរៀងរាល់ 5 នាទី
         stalkerTask = Bukkit.getScheduler().runTaskTimer(
-                this, this::randomSpawn, 6000L, 6000L
+                this, this::randomSpawn, 200L, 200L
         );
 
         getLogger().info("The Red Stalker has awakened!");
@@ -48,58 +40,15 @@ public final class RedStalkerPlugin extends JavaPlugin
 
     @Override
     public void onDisable() {
-        if (stalkerTask != null) {
-            stalkerTask.cancel();
-        }
+        if (stalkerTask != null) stalkerTask.cancel();
 
-        getLogger().info("The Red Stalker has disappeared.");
-    }
-
-    private void randomSpawn() {
-        if (waitingToReturn) return;
-
-        // កុំបង្កើត Stalker ថ្មី បើមានមួយកំពុងរស់
         for (World world : Bukkit.getWorlds()) {
             for (Entity entity : world.getEntities()) {
                 if (entity instanceof Zombie zombie && isStalker(zombie)) {
-                    return;
+                    zombie.remove();
                 }
             }
         }
-
-        // ឱកាស 25% ក្នុងមួយការពិនិត្យ
-        if (random.nextInt(4) != 0) return;
-
-        var players = Bukkit.getOnlinePlayers().stream()
-                .filter(player -> !player.isDead())
-                .toList();
-
-        if (players.isEmpty()) return;
-
-        Player player = players.get(random.nextInt(players.size()));
-        Location location = player.getLocation().clone();
-
-        double angle = random.nextDouble() * Math.PI * 2;
-        int distance = 12 + random.nextInt(9);
-
-        location.add(
-                Math.cos(angle) * distance,
-                0,
-                Math.sin(angle) * distance
-        );
-
-        World world = location.getWorld();
-        if (world == null) return;
-
-        location.setY(world.getHighestBlockYAt(location) + 1);
-
-        if (!location.getBlock().isPassable()
-                || !location.clone().add(0, 1, 0)
-                .getBlock().isPassable()) {
-            return;
-        }
-
-        spawnRedStalker(location);
     }
 
     private boolean isStalker(Zombie zombie) {
@@ -107,7 +56,7 @@ public final class RedStalkerPlugin extends JavaPlugin
                 .has(stalkerKey, PersistentDataType.BYTE);
     }
 
-    private ItemStack createTrimmedArmor(Material material) {
+    private ItemStack createArmor(Material material) {
         ItemStack item = new ItemStack(material);
         ArmorMeta meta = (ArmorMeta) item.getItemMeta();
 
@@ -122,13 +71,60 @@ public final class RedStalkerPlugin extends JavaPlugin
         return item;
     }
 
-    private void spawnRedStalker(Location location) {
-        World world = location.getWorld();
+    private Location findLocation(Player player, int min, int max) {
+        World world = player.getWorld();
+
+        for (int i = 0; i < 20; i++) {
+            double angle = random.nextDouble() * Math.PI * 2;
+            int distance = min + random.nextInt(max - min + 1);
+
+            Location loc = player.getLocation().clone().add(
+                    Math.cos(angle) * distance, 0,
+                    Math.sin(angle) * distance
+            );
+
+            loc.setY(world.getHighestBlockYAt(loc) + 1);
+
+            if (loc.getBlock().isPassable()
+                    && loc.clone().add(0, 1, 0).getBlock().isPassable()
+                    && loc.distance(player.getLocation()) >= min) {
+                return loc;
+            }
+        }
+
+        return null;
+    }
+
+    private void randomSpawn() {
+        if (waitingToReturn) return;
+
+        for (World world : Bukkit.getWorlds()) {
+            for (Entity entity : world.getEntities()) {
+                if (entity instanceof Zombie zombie && isStalker(zombie)) {
+                    return;
+                }
+            }
+        }
+
+        if (random.nextInt(4) != 0) return;
+
+        var players = Bukkit.getOnlinePlayers().stream()
+                .filter(p -> !p.isDead() && p.getGameMode() != GameMode.SPECTATOR)
+                .toList();
+
+        if (players.isEmpty()) return;
+
+        Player target = players.get(random.nextInt(players.size()));
+        Location loc = findLocation(target, 12, 22);
+
+        if (loc != null) spawnStalker(loc, target);
+    }
+
+    private void spawnStalker(Location loc, Player target) {
+        World world = loc.getWorld();
         if (world == null) return;
 
-        Zombie zombie = (Zombie) world.spawnEntity(
-                location, EntityType.ZOMBIE
-        );
+        Zombie zombie = (Zombie) world.spawnEntity(loc, EntityType.ZOMBIE);
 
         zombie.getPersistentDataContainer().set(
                 stalkerKey, PersistentDataType.BYTE, (byte) 1
@@ -139,58 +135,175 @@ public final class RedStalkerPlugin extends JavaPlugin
         zombie.setSilent(true);
         zombie.setCanPickupItems(false);
         zombie.setRemoveWhenFarAway(false);
+        zombie.setShouldBurnInDay(false);
+        zombie.setAI(false);
+        zombie.setInvulnerable(true);
 
         zombie.addPotionEffect(new PotionEffect(
                 PotionEffectType.INVISIBILITY,
-                PotionEffect.INFINITE_DURATION,
-                0,
-                false,
-                false
+                PotionEffect.INFINITE_DURATION, 0,
+                false, false, false
         ));
 
         zombie.getEquipment().setHelmet(
-                createTrimmedArmor(Material.NETHERITE_HELMET));
+                createArmor(Material.NETHERITE_HELMET));
         zombie.getEquipment().setChestplate(
-                createTrimmedArmor(Material.NETHERITE_CHESTPLATE));
+                createArmor(Material.NETHERITE_CHESTPLATE));
         zombie.getEquipment().setLeggings(
-                createTrimmedArmor(Material.NETHERITE_LEGGINGS));
+                createArmor(Material.NETHERITE_LEGGINGS));
         zombie.getEquipment().setBoots(
-                createTrimmedArmor(Material.NETHERITE_BOOTS));
+                createArmor(Material.NETHERITE_BOOTS));
         zombie.getEquipment().setItemInMainHand(
                 new ItemStack(Material.FISHING_ROD));
 
-        zombie.getEquipment().setHelmetDropChance(0.0f);
-        zombie.getEquipment().setChestplateDropChance(0.0f);
-        zombie.getEquipment().setLeggingsDropChance(0.0f);
-        zombie.getEquipment().setBootsDropChance(0.0f);
-        zombie.getEquipment().setItemInMainHandDropChance(0.0f);
+        zombie.getEquipment().setHelmetDropChance(0);
+        zombie.getEquipment().setChestplateDropChance(0);
+        zombie.getEquipment().setLeggingsDropChance(0);
+        zombie.getEquipment().setBootsDropChance(0);
+        zombie.getEquipment().setItemInMainHandDropChance(0);
 
-        getLogger().info("The Red Stalker spawned!");
+        lookAt(zombie, target);
+
+        target.playSound(
+                target.getLocation(),
+                Sound.AMBIENT_CAVE, 1.0f, 0.5f
+        );
+
+        getLogger().info("The Red Stalker appeared!");
+
+        // Watch silently, then vanish after a random interval.
+        int watchTime = 80 + random.nextInt(101);
+
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            if (!zombie.isValid()) return;
+
+            Player nearest = nearestPlayer(zombie.getLocation(), 30);
+
+            if (nearest != null) {
+                // Red particles and a frightening sound.
+                world.spawnParticle(
+                        Particle.DUST,
+                        zombie.getLocation().add(0, 1, 0),
+                        18, 0.4, 0.7, 0.4,
+                        new Particle.DustOptions(Color.RED, 1.5f)
+                );
+
+                nearest.playSound(
+                        nearest.getLocation(),
+                        Sound.ENTITY_ENDERMAN_TELEPORT,
+                        1.0f, 0.6f
+                );
+
+                // Occasionally appear behind the player.
+                if (random.nextInt(4) == 0) {
+                    Location behind = nearest.getLocation().clone()
+                            .add(nearest.getLocation().getDirection()
+                                    .multiply(-5));
+
+                    behind.setY(nearest.getLocation().getY());
+
+                    if (behind.getBlock().isPassable()
+                            && behind.clone().add(0, 1, 0)
+                            .getBlock().isPassable()) {
+                        zombie.teleport(behind);
+                        lookAt(zombie, nearest);
+                    }
+                }
+
+                // Occasionally throw a harmless fishing rod item
+                // as a visual prank. It does not hook or damage players.
+                if (random.nextInt(3) == 0) {
+                    Item dropped = world.dropItem(
+                            zombie.getLocation().add(0, 1, 0),
+                            new ItemStack(Material.FISHING_ROD)
+                    );
+
+                    dropped.setPickupDelay(40);
+                    dropped.setVelocity(
+                            nearest.getLocation().toVector()
+                                    .subtract(zombie.getLocation().toVector())
+                                    .normalize().multiply(0.5)
+                                    .add(new Vector(0, 0.25, 0))
+                    );
+                }
+            }
+
+            vanish(zombie);
+        }, watchTime);
+    }
+
+    private void lookAt(Zombie zombie, Player target) {
+        Location from = zombie.getLocation();
+        Vector direction = target.getEyeLocation().toVector()
+                .subtract(from.toVector()).normalize();
+
+        Location facing = from.clone();
+        facing.setDirection(direction);
+        zombie.teleport(facing);
+    }
+
+    private Player nearestPlayer(Location loc, double range) {
+        return loc.getWorld().getPlayers().stream()
+                .filter(p -> !p.isDead()
+                        && p.getGameMode() != GameMode.SPECTATOR)
+                .filter(p -> p.getLocation().distanceSquared(loc)
+                        <= range * range)
+                .min((a, b) -> Double.compare(
+                        a.getLocation().distanceSquared(loc),
+                        b.getLocation().distanceSquared(loc)))
+                .orElse(null);
+    }
+
+    private void vanish(Zombie zombie) {
+        if (!zombie.isValid()) return;
+
+        Location oldLocation = zombie.getLocation().clone();
+        World world = oldLocation.getWorld();
+
+        if (world != null) {
+            world.spawnParticle(
+                    Particle.DUST,
+                    oldLocation.add(0, 1, 0),
+                    25, 0.5, 0.8, 0.5,
+                    new Particle.DustOptions(Color.RED, 1.8f)
+            );
+        }
+
+        zombie.remove();
+
+        waitingToReturn = true;
+
+        // Return after 3–4 minutes.
+        long delay = (180 + random.nextInt(61)) * 20L;
+
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            try {
+                if (Bukkit.getOnlinePlayers().isEmpty()) return;
+
+                var players = Bukkit.getOnlinePlayers().stream()
+                        .filter(p -> !p.isDead()
+                                && p.getGameMode() != GameMode.SPECTATOR)
+                        .toList();
+
+                if (players.isEmpty()) return;
+
+                Player target = players.get(
+                        random.nextInt(players.size()));
+
+                Location loc = findLocation(target, 12, 22);
+
+                if (loc != null) spawnStalker(loc, target);
+            } finally {
+                waitingToReturn = false;
+            }
+        }, delay);
     }
 
     @EventHandler
     public void onStalkerDamaged(EntityDamageEvent event) {
-        if (!(event.getEntity() instanceof Zombie zombie)) return;
-        if (!isStalker(zombie)) return;
-
-        event.setCancelled(true);
-
-        if (waitingToReturn) return;
-
-        waitingToReturn = true;
-        Location returnLocation = zombie.getLocation().clone();
-
-        zombie.remove();
-
-        // ត្រឡប់មកវិញក្រោយ 60 វិនាទី
-        Bukkit.getScheduler().runTaskLater(this, () -> {
-            try {
-                if (!Bukkit.getOnlinePlayers().isEmpty()) {
-                    spawnRedStalker(returnLocation);
-                }
-            } finally {
-                waitingToReturn = false;
-            }
-        }, 1200L);
+        if (event.getEntity() instanceof Zombie zombie
+                && isStalker(zombie)) {
+            event.setCancelled(true);
+        }
     }
-            }
+                }
