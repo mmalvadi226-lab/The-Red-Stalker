@@ -38,8 +38,9 @@ public final class RedStalkerPlugin extends JavaPlugin
         stalkerKey = new NamespacedKey(this, "red_stalker");
         Bukkit.getPluginManager().registerEvents(this, this);
 
+        // ពិនិត្យរៀងរាល់ 5 នាទី
         stalkerTask = Bukkit.getScheduler().runTaskTimer(
-                this, this::randomSpawn, 1200L, 1200L
+                this, this::randomSpawn, 6000L, 6000L
         );
 
         getLogger().info("The Red Stalker has awakened!");
@@ -50,11 +51,14 @@ public final class RedStalkerPlugin extends JavaPlugin
         if (stalkerTask != null) {
             stalkerTask.cancel();
         }
+
+        getLogger().info("The Red Stalker has disappeared.");
     }
 
     private void randomSpawn() {
         if (waitingToReturn) return;
 
+        // កុំបង្កើត Stalker ថ្មី បើមានមួយកំពុងរស់
         for (World world : Bukkit.getWorlds()) {
             for (Entity entity : world.getEntities()) {
                 if (entity instanceof Zombie zombie && isStalker(zombie)) {
@@ -63,6 +67,7 @@ public final class RedStalkerPlugin extends JavaPlugin
             }
         }
 
+        // ឱកាស 25% ក្នុងមួយការពិនិត្យ
         if (random.nextInt(4) != 0) return;
 
         var players = Bukkit.getOnlinePlayers().stream()
@@ -83,13 +88,18 @@ public final class RedStalkerPlugin extends JavaPlugin
                 Math.sin(angle) * distance
         );
 
-        location.setY(location.getWorld()
-                .getHighestBlockYAt(location) + 1);
+        World world = location.getWorld();
+        if (world == null) return;
 
-        if (location.getBlock().isPassable()
-                && location.clone().add(0, 1, 0).getBlock().isPassable()) {
-            spawnRedStalker(location);
+        location.setY(world.getHighestBlockYAt(location) + 1);
+
+        if (!location.getBlock().isPassable()
+                || !location.clone().add(0, 1, 0)
+                .getBlock().isPassable()) {
+            return;
         }
+
+        spawnRedStalker(location);
     }
 
     private boolean isStalker(Zombie zombie) {
@@ -113,14 +123,19 @@ public final class RedStalkerPlugin extends JavaPlugin
     }
 
     private void spawnRedStalker(Location location) {
-        Zombie zombie = (Zombie) location.getWorld()
-                .spawnEntity(location, EntityType.ZOMBIE);
+        World world = location.getWorld();
+        if (world == null) return;
+
+        Zombie zombie = (Zombie) world.spawnEntity(
+                location, EntityType.ZOMBIE
+        );
 
         zombie.getPersistentDataContainer().set(
                 stalkerKey, PersistentDataType.BYTE, (byte) 1
         );
 
         zombie.setCustomName("§c§lThe Red Stalker");
+        zombie.setCustomNameVisible(false);
         zombie.setSilent(true);
         zombie.setCanPickupItems(false);
         zombie.setRemoveWhenFarAway(false);
@@ -128,7 +143,9 @@ public final class RedStalkerPlugin extends JavaPlugin
         zombie.addPotionEffect(new PotionEffect(
                 PotionEffectType.INVISIBILITY,
                 PotionEffect.INFINITE_DURATION,
-                0, false, false
+                0,
+                false,
+                false
         ));
 
         zombie.getEquipment().setHelmet(
@@ -142,11 +159,11 @@ public final class RedStalkerPlugin extends JavaPlugin
         zombie.getEquipment().setItemInMainHand(
                 new ItemStack(Material.FISHING_ROD));
 
-        zombie.getEquipment().setHelmetDropChance(0);
-        zombie.getEquipment().setChestplateDropChance(0);
-        zombie.getEquipment().setLeggingsDropChance(0);
-        zombie.getEquipment().setBootsDropChance(0);
-        zombie.getEquipment().setItemInMainHandDropChance(0);
+        zombie.getEquipment().setHelmetDropChance(0.0f);
+        zombie.getEquipment().setChestplateDropChance(0.0f);
+        zombie.getEquipment().setLeggingsDropChance(0.0f);
+        zombie.getEquipment().setBootsDropChance(0.0f);
+        zombie.getEquipment().setItemInMainHandDropChance(0.0f);
 
         getLogger().info("The Red Stalker spawned!");
     }
@@ -165,11 +182,15 @@ public final class RedStalkerPlugin extends JavaPlugin
 
         zombie.remove();
 
+        // ត្រឡប់មកវិញក្រោយ 60 វិនាទី
         Bukkit.getScheduler().runTaskLater(this, () -> {
-            if (!Bukkit.getOnlinePlayers().isEmpty()) {
-                spawnRedStalker(returnLocation);
+            try {
+                if (!Bukkit.getOnlinePlayers().isEmpty()) {
+                    spawnRedStalker(returnLocation);
+                }
+            } finally {
+                waitingToReturn = false;
             }
-            waitingToReturn = false;
         }, 1200L);
     }
             }
