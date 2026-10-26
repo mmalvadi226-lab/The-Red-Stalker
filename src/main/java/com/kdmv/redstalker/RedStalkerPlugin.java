@@ -5,7 +5,6 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
 import org.bukkit.World;
-import org.bukkit.attribute.Attribute;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
@@ -24,50 +23,24 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
+import java.util.Random;
 
-public final class RedStalkerPlugin extends JavaPlugin implements Listener {
+public final class RedStalkerPlugin extends JavaPlugin
+        implements Listener {
 
     private NamespacedKey stalkerKey;
-    private final Map<UUID, Long> cooldowns = new HashMap<>();
+    private final Random random = new Random();
     private BukkitTask stalkerTask;
+    private boolean waitingToReturn = false;
 
     @Override
     public void onEnable() {
         stalkerKey = new NamespacedKey(this, "red_stalker");
         Bukkit.getPluginManager().registerEvents(this, this);
 
-        stalkerTask = Bukkit.getScheduler().runTaskTimer(this, () -> {
-            for (World world : Bukkit.getWorlds()) {
-                for (Entity entity : world.getEntities()) {
-                    if (!(entity instanceof Zombie zombie)) continue;
-                    if (!isStalker(zombie)) continue;
-
-                    Player target = null;
-                    double nearest = 36 * 36;
-
-                    for (Player player : world.getPlayers()) {
-                        if (player.isDead() || !player.isOnline()) continue;
-
-                        double distance = player.getLocation()
-                                .distanceSquared(zombie.getLocation());
-
-                        if (distance < nearest) {
-                            nearest = distance;
-                            target = player;
-                        }
-                    }
-
-                    if (target != null) {
-                        zombie.setTarget(target);
-                    } else {
-                        zombie.setTarget(null);
-                    }
-                }
-            }
-        }, 20L, 40L);
+        stalkerTask = Bukkit.getScheduler().runTaskTimer(
+                this, this::randomSpawn, 1200L, 1200L
+        );
 
         getLogger().info("The Red Stalker has awakened!");
     }
@@ -77,7 +50,46 @@ public final class RedStalkerPlugin extends JavaPlugin implements Listener {
         if (stalkerTask != null) {
             stalkerTask.cancel();
         }
-        getLogger().info("The Red Stalker has disappeared.");
+    }
+
+    private void randomSpawn() {
+        if (waitingToReturn) return;
+
+        for (World world : Bukkit.getWorlds()) {
+            for (Entity entity : world.getEntities()) {
+                if (entity instanceof Zombie zombie && isStalker(zombie)) {
+                    return;
+                }
+            }
+        }
+
+        if (random.nextInt(4) != 0) return;
+
+        var players = Bukkit.getOnlinePlayers().stream()
+                .filter(player -> !player.isDead())
+                .toList();
+
+        if (players.isEmpty()) return;
+
+        Player player = players.get(random.nextInt(players.size()));
+        Location location = player.getLocation().clone();
+
+        double angle = random.nextDouble() * Math.PI * 2;
+        int distance = 12 + random.nextInt(9);
+
+        location.add(
+                Math.cos(angle) * distance,
+                0,
+                Math.sin(angle) * distance
+        );
+
+        location.setY(location.getWorld()
+                .getHighestBlockYAt(location) + 1);
+
+        if (location.getBlock().isPassable()
+                && location.clone().add(0, 1, 0).getBlock().isPassable()) {
+            spawnRedStalker(location);
+        }
     }
 
     private boolean isStalker(Zombie zombie) {
@@ -100,7 +112,7 @@ public final class RedStalkerPlugin extends JavaPlugin implements Listener {
         return item;
     }
 
-    public void spawnRedStalker(Location location) {
+    private void spawnRedStalker(Location location) {
         Zombie zombie = (Zombie) location.getWorld()
                 .spawnEntity(location, EntityType.ZOMBIE);
 
@@ -109,16 +121,14 @@ public final class RedStalkerPlugin extends JavaPlugin implements Listener {
         );
 
         zombie.setCustomName("§c§lThe Red Stalker");
-        zombie.setCustomNameVisible(false);
         zombie.setSilent(true);
         zombie.setCanPickupItems(false);
         zombie.setRemoveWhenFarAway(false);
+
         zombie.addPotionEffect(new PotionEffect(
                 PotionEffectType.INVISIBILITY,
                 PotionEffect.INFINITE_DURATION,
-                0,
-                false,
-                false
+                0, false, false
         ));
 
         zombie.getEquipment().setHelmet(
@@ -132,11 +142,13 @@ public final class RedStalkerPlugin extends JavaPlugin implements Listener {
         zombie.getEquipment().setItemInMainHand(
                 new ItemStack(Material.FISHING_ROD));
 
-        zombie.getEquipment().setHelmetDropChance(0.0f);
-        zombie.getEquipment().setChestplateDropChance(0.0f);
-        zombie.getEquipment().setLeggingsDropChance(0.0f);
-        zombie.getEquipment().setBootsDropChance(0.0f);
-        zombie.getEquipment().setItemInMainHandDropChance(0.0f);
+        zombie.getEquipment().setHelmetDropChance(0);
+        zombie.getEquipment().setChestplateDropChance(0);
+        zombie.getEquipment().setLeggingsDropChance(0);
+        zombie.getEquipment().setBootsDropChance(0);
+        zombie.getEquipment().setItemInMainHandDropChance(0);
+
+        getLogger().info("The Red Stalker spawned!");
     }
 
     @EventHandler
@@ -146,27 +158,18 @@ public final class RedStalkerPlugin extends JavaPlugin implements Listener {
 
         event.setCancelled(true);
 
-        UUID id = zombie.getUniqueId();
-        long now = System.currentTimeMillis();
+        if (waitingToReturn) return;
 
-        if (cooldowns.getOrDefault(id, 0L) > now) return;
+        waitingToReturn = true;
+        Location returnLocation = zombie.getLocation().clone();
 
-        cooldowns.put(id, now + 60_000L);
-
-        Location oldLocation = zombie.getLocation();
-        World world = oldLocation.getWorld();
-
-        zombie.teleport(world.getSpawnLocation());
+        zombie.remove();
 
         Bukkit.getScheduler().runTaskLater(this, () -> {
-            if (!zombie.isValid() || zombie.isDead()) return;
-
-            Location returnLocation = oldLocation.clone();
-            returnLocation.add(3, 0, 3);
-
-            if (returnLocation.getWorld() != null) {
-                zombie.teleport(returnLocation);
+            if (!Bukkit.getOnlinePlayers().isEmpty()) {
+                spawnRedStalker(returnLocation);
             }
+            waitingToReturn = false;
         }, 1200L);
     }
-                        }
+            }
